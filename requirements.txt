@@ -1,0 +1,6 @@
+playwright==1.42.0
+beautifulsoup4==4.12.3
+lxml==5.2.1
+python-dotenv==1.0.1
+pandas==2.2.1        # 未來資料分析用
+loguru==0.7.2        # 結構化 logging
