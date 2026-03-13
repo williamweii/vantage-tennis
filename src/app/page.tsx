@@ -103,7 +103,7 @@ const DISTRICTS = [...new Set(Object.values(VENUE_DICT).map((v) => v.district))]
 export default function Home() {
   const [date, setDate] = useState("");
   const [showAvailOnly, setShowAvailOnly] = useState(false);
-  const [showUnlisted, setShowUnlisted] = useState(false);
+  const [showBookableOnly, setShowBookableOnly] = useState(false);
   const [selectedDistrict, setSelectedDistrict] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
@@ -142,10 +142,15 @@ export default function Home() {
 
   const locked = isLockedPeriod(date);
 
-  // Filter logic: showAvailOnly hides venues with 0 online-bookable slots
-  // But if locked period, "有空位" means has locked (walk-in chance) slots
+  // Filter logic
+  // showBookableOnly: strictest – only venues with online-bookable (green) slots
+  // showAvailOnly: looser – includes walk-in (amber) slots during locked period
   const displayed = venues
-    .filter((v) => !showAvailOnly || (locked ? v.lockedCount > 0 : v.availCount > 0))
+    .filter((v) => {
+      if (showBookableOnly) return v.availCount > 0;
+      if (showAvailOnly) return locked ? v.lockedCount > 0 : v.availCount > 0;
+      return true;
+    })
     .filter((v) => !selectedDistrict || v.district === selectedDistrict);
 
   const totalAvailVenues = venues.filter((v) =>
@@ -258,7 +263,7 @@ export default function Home() {
                 </span>
               </span>
             </div>
-            {/* Toggle 1: available only */}
+            {/* Toggles */}
             <div className="flex flex-col items-end gap-2">
               <label className="flex items-center gap-2.5 cursor-pointer select-none text-sm text-zinc-400">
                 <div className="relative">
@@ -273,19 +278,18 @@ export default function Home() {
                 </div>
                 {locked ? "只顯示有排隊機會" : "只顯示有空位"}
               </label>
-              {/* Toggle 2: show unlisted venues */}
               <label className="flex items-center gap-2.5 cursor-pointer select-none text-sm text-zinc-400">
                 <div className="relative">
                   <input
                     type="checkbox"
                     className="sr-only peer"
-                    checked={showUnlisted}
-                    onChange={(e) => setShowUnlisted(e.target.checked)}
+                    checked={showBookableOnly}
+                    onChange={(e) => setShowBookableOnly(e.target.checked)}
                   />
-                  <div className="w-10 h-5 bg-zinc-700 peer-checked:bg-violet-500 rounded-full transition-colors" />
+                  <div className="w-10 h-5 bg-zinc-700 peer-checked:bg-emerald-500 rounded-full transition-colors" />
                   <div className="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-all peer-checked:translate-x-5" />
                 </div>
-                顯示未開放租借場地
+                只顯示可預約
               </label>
             </div>
           </div>
@@ -389,7 +393,8 @@ export default function Home() {
                         const isAvail = slot.status === "可預約";
                         const isLocked = slot.status === LOCKED_STATUS;
                         const isFull = !isAvail && !isLocked;
-                        if (showAvailOnly && isFull) return null;
+                        if ((showAvailOnly || showBookableOnly) && isFull) return null;
+                        if (showBookableOnly && isLocked) return null;
                         return (
                           <span
                             key={slot.time_slot}
@@ -426,9 +431,8 @@ export default function Home() {
               );
             })}
 
-            {/* ── 未開放租借場地（開關控制）────── */}
-            {showUnlisted &&
-              UNLISTED_VENUES.filter((v) => !selectedDistrict || v.district === selectedDistrict).map((v) => (
+            {/* ── 未開放租借場地（永遠顯示）────── */}
+            {UNLISTED_VENUES.filter((v) => !selectedDistrict || v.district === selectedDistrict).map((v) => (
                 <div
                   key={v.venue_k}
                   className="group flex flex-col gap-4 rounded-xl p-5 border min-h-[200px] border-violet-500/20 bg-violet-500/5 hover:border-violet-400/40 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
