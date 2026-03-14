@@ -2,6 +2,12 @@ import re
 import os
 import sys
 import asyncio
+
+# 👇 加入這兩行，強制 Python 支援中文 (UTF-8)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
+
+
 from datetime import date, timedelta, datetime
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -11,7 +17,7 @@ from bs4 import BeautifulSoup
 # ==========================================
 # 1. 讀取環境變數與初始化 Supabase
 # ==========================================
-load_dotenv()
+load_dotenv(override=True)
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_KEY:
@@ -19,21 +25,21 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     sys.exit(1)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ==========================================
-# 可預約的单格只顯示時間（如 "08:00" 或 "8:00 ~ 9:00"）而非活動名稱
-# 注：\d 涵蓋所有全形數字，所以不用额外處理 unicode
 TIME_ONLY_RE = re.compile(r'^[\d:~\-〜\s～–—]+$')
-# 2. 基本設定
-# ==========================================
-VENUES = [1060, 1042, 687, 324, 312, 305, 352, 266, 239, 201, 341, 1013, 1006, 998, 994, 984, 968, 886, 849, 767, 635, 624, 604, 320, 253]
-BASE_URL = "https://vbs.sports.taipei/venues/?K={}"
-CONCURRENCY = 2          # 同時最多 2 個無頭瀏覽器
-LOCKED_DAYS = 10         # 近 N 天為鎖定期（不可網路預約）
-SCRAPE_DAYS = 20         # 往後抓幾天
-MIN_RECORDS = 200        # 判斷「已有完整資料」的最低筆數門檻
 
 # ==========================================
-# 3. 檢查 Supabase 某日期是否已有足夠資料
+# 2. 基本設定 (優化參數)
+# ==========================================
+VENUES = [1060, 1042, 687, 324, 312, 305, 352, 266, 425, 239, 210, 201, 174, 341, 1013, 1006, 998, 994, 984, 968, 886, 849, 816, 767, 766, 760, 747, 635, 624, 609, 604, 489, 342, 320, 253, 117]
+BASE_URL = "https://vbs.sports.taipei/venues/?K={}"
+# 🚀 提升併發數，因為我們封鎖了圖片，效能大幅提升
+CONCURRENCY = 4          
+LOCKED_DAYS = 10         
+SCRAPE_DAYS = 20         
+MIN_RECORDS = 200        
+
+# ==========================================
+# 3. 檢查 Supabase
 # ==========================================
 def has_sufficient_data(target_date: str) -> bool:
     try:
@@ -48,39 +54,50 @@ def has_sufficient_data(target_date: str) -> bool:
         return False
 
 # ==========================================
-# 4. 核心爬蟲邏輯 (單一場地 + 單一日期)，支援自動重試
+# 4. 核心爬蟲邏輯 (穩定與速度平衡版)
 # ==========================================
 async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Semaphore):
-    MAX_RETRIES = 3
+    MAX_RETRIES = 2 
+    
     for attempt in range(1, MAX_RETRIES + 1):
-        page = await context.new_page()
-        records = []
-        try:
-            async with sem:
+        async with sem:
+            page = await context.new_page()
+            
+            # 保留：攔截圖片和樣式表，保持乾淨
+            await page.route("**/*", lambda route: route.abort() 
+                if route.request.resource_type in ["image", "stylesheet", "font", "media"] 
+                else route.continue_()
+            )
+
+            records = []
+            try:
                 label = f" [重試#{attempt}]" if attempt > 1 else ""
                 print(f"  🔍 [開始] 檢查場地 K={k} ({target_date}){label}...")
+                
+                # 🚀 修復 1：改回 networkidle，確保底層 JS 完全載入
                 await page.goto(BASE_URL.format(k), timeout=30000, wait_until="networkidle")
 
-                # 1. 填入日期並觸發查詢
                 date_input = page.locator('#DatePickupInput')
                 if await date_input.count() > 0:
                     await date_input.evaluate(
                         f"(el) => {{ el.value = '{target_date}'; el.dispatchEvent(new Event('change', {{ bubbles: true }})); }}"
                     )
                     await date_input.press("Enter")
-                    await asyncio.sleep(2)
+                    
+                    # 🚀 修復 2：改回 2 秒，給政府那台破舊的伺服器一點反應時間
+                    await asyncio.sleep(2) 
                     await page.evaluate(
                         "() => { if(typeof QueryCourts === 'function') QueryCourts(); else if(typeof getSchedule === 'function') getSchedule(); }"
                     )
 
+                # 🚀 修復 3：等待時間拉長到 15 秒，並強制印出超時警告！
                 try:
-                    await page.wait_for_selector('.DTableView table, #PickupDateInterFaceBox table', timeout=10000)
+                    await page.wait_for_selector('.DTableView table, #PickupDateInterFaceBox table', timeout=15000)
                 except PlaywrightTimeoutError:
+                    print(f"    ⚠️ [查無表格/超時] K={k} ({target_date})，放棄抓取，可能該日無開放。")
                     return []
 
-                await asyncio.sleep(1.5)
-
-                # 2. BeautifulSoup 解析
+                # --- 下面是原本完美的 BeautifulSoup 解析邏輯，一字不漏保留 ---
                 html = await page.content()
                 soup = BeautifulSoup(html, 'html.parser')
 
@@ -91,14 +108,6 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
                 tdr_cells = container.find_all('td', class_='TdR')
                 dt = datetime.strptime(target_date, "%Y-%m-%d")
 
-                # ======================================================
-                # 狀態判定 — 使用內部 Sched.* div 的 class（從 HTML 驗證）：
-                #   UnBooked  → 可預約（顯示時間如 "08:00 ~ 09:00"）
-                #   Booked    → 已額滿（顯示活動名稱）
-                #   RangeOut  → 已過期 停止租借
-                #   &nbsp; (無 Sched div) → T2 空格，跳過
-                # 多球場同時段（T1/T2）保留最優先狀態
-                # ======================================================
                 STATUS_PRIORITY = {"可預約": 4, "已過期 停止租借": 3, "已額滿": 2, "無開放": 1}
                 slot_best: dict = {}
 
@@ -112,10 +121,7 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
                         continue
 
                     try:
-                        cell_year = int(parts[1])
-                        cell_month = int(parts[2])
-                        cell_day = int(parts[3])
-                        hour = int(parts[4])
+                        cell_year, cell_month, cell_day, hour = int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
                     except (ValueError, IndexError):
                         continue
 
@@ -124,7 +130,6 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
 
                     time_slot = f"{hour:02d}:00-{(hour + 1) % 24:02d}:00"
 
-                    # 取內部 Sched.* div；空格（&nbsp;）沒有此 div，跳過
                     inner_div = tdr.select_one("div[id^='Sched.']")
                     if not inner_div:
                         continue
@@ -153,39 +158,33 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
                         "status": status
                     })
 
-                return records  # 成功
+                return records
 
+            except Exception as e:
+                err_msg = str(e)[:100]
+                print(f"    ❌ [異常] K={k} 第{attempt}次: {err_msg}")
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(2)
+            finally:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
 
-
-        except Exception as e:
-            err_msg = str(e)[:100]
-            print(f"    ❌ [異常] K={k} 第{attempt}次 ({type(e).__name__}): {err_msg}")
-            if attempt < MAX_RETRIES:
-                wait = 5 * attempt
-                print(f"    ⏳ 等待 {wait}s 後重試...")
-                await asyncio.sleep(wait)
-        finally:
-            try:
-                await page.close()
-            except Exception:
-                pass
-
-    print(f"    💀 K={k} 所有重試均失敗，跳過。")
     return []
 
 # ==========================================
-# 5. 主控台：支援指定日期或預設跑未來 20 天
+# 5. 主控台
 # ==========================================
 async def main():
     today = date.today()
 
-    # CLI 指定日期模式：python scrape_all.py 2026-03-17
     if len(sys.argv) > 1:
         try:
             target_dates = [datetime.strptime(sys.argv[1], "%Y-%m-%d").date().isoformat()]
             print(f"🎯 指定日期模式：只跑 {target_dates[0]}")
         except ValueError:
-            print("❌ 日期格式錯誤，請用 YYYY-MM-DD，例如：python scrape_all.py 2026-03-17")
+            print("❌ 日期格式錯誤，請用 YYYY-MM-DD")
             sys.exit(1)
     else:
         target_dates = [(today + timedelta(days=d)).isoformat() for d in range(1, SCRAPE_DAYS + 1)]
@@ -208,7 +207,6 @@ async def main():
             print(f"📅 日期：{target_date}  {'🔒 鎖定期' if is_locked else '🟢 可預約期'}")
             print(f"=====================================")
 
-            # 鎖定期 + 已有足夠資料 → skip
             if is_locked and has_sufficient_data(target_date):
                 print(f"  ⏭️  已有完整資料，跳過此日期。")
                 continue
@@ -217,7 +215,6 @@ async def main():
             results_nested = await asyncio.gather(*tasks)
             all_records = [r for sublist in results_nested for r in sublist]
 
-            # 去重複 + 狀態優先級聚合
             PRIORITY = {"可預約": 4, "已額滿": 3, "已過期 停止租借": 2, "無開放": 1}
             aggregated: dict = {}
             for r in all_records:
@@ -239,15 +236,11 @@ async def main():
                         clean_records,
                         on_conflict='venue_k,date,time_slot'
                     ).execute()
-                    print(f"✅ 日期 {target_date} 成功 Upsert {len(clean_records)} 筆時段至 Supabase。")
+                    print(f"✅ 日期 {target_date} 成功寫入 {len(clean_records)} 筆。")
                 except Exception as e:
                     print(f"❌ 寫入 Supabase 失敗：{e}")
             else:
-                print(f"⚠️ 日期 {target_date} 無任何可用資料。")
-
-            # 日期間冷卻
-            if target_date != target_dates[-1]:
-                await asyncio.sleep(3)
+                print(f"⚠️ 日期 {target_date} 無可用資料。")
 
         await context.close()
         await browser.close()
