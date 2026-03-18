@@ -33,9 +33,30 @@ const PRACTICE_WALLS = [
   { venue_k: 117,  name: '青年公園網球練習壁', district: '萬華區' },
 ];
 
-// 未開放租借場地：預設隱藏，可從開關顯示
+// 未開放租借場地（靜態卡，不爬）
 const UNLISTED_VENUES = [
-  { venue_k: 827, name: '青年公園運動休閒園區', district: '萬華區', desc: '未開放租借' },
+  { venue_k: 827,  name: '青年公園運動休閒園區',    district: '萬華區' },
+  { venue_k: 1013, name: '蘭興公園網球場',          district: '信義區' },
+  { venue_k: 1006, name: '榮華公園網球場',          district: '文山區' },
+  { venue_k: 998,  name: '復興公園網球場',          district: '文山區' },
+  { venue_k: 994,  name: '大豐公園網球場',          district: '文山區' },
+  { venue_k: 984,  name: '觀海公園網球場',          district: '北投區' },
+  { venue_k: 968,  name: '天溪綠地游泳池網球場',    district: '北投區' },
+  { venue_k: 886,  name: '臺北網球場',              district: '大安區' },
+  { venue_k: 849,  name: '萬有2號公園網球場',        district: '萬華區' },
+  { venue_k: 816,  name: '天壽公園網球場',          district: '內湖區' },
+  { venue_k: 766,  name: '石潭公園網球場',          district: '內湖區' },
+  { venue_k: 767,  name: '瑞湖公園網球場',          district: '內湖區' },
+  { venue_k: 760,  name: '煙波庭公園網球場',        district: '內湖區' },
+  { venue_k: 635,  name: '中研公園網球場',          district: '南港區' },
+  { venue_k: 624,  name: '玉成公園網球場',          district: '信義區' },
+  { venue_k: 609,  name: '南港公園網球場',          district: '南港區' },
+  { venue_k: 604,  name: '碧湖公園網球場',          district: '內湖區' },
+  { venue_k: 489,  name: '景美河濱公園網球場',      district: '文山區' },
+  { venue_k: 320,  name: '民權公園網球場',          district: '松山區' },
+  { venue_k: 747,  name: '道南河濱公園網球場3號',    district: '萬華區' },
+  { venue_k: 253,  name: '道南河濱公園網球場1〜2號', district: '萬華區' },
+  { venue_k: 342,  name: '天母運動場區網球場',      district: '士林區' },
 ];
 
 function isLockedPeriod(dateStr: string): boolean {
@@ -52,6 +73,7 @@ function groupByVenue(rows: SlotRow[]): VenueGroup[] {
   for (const [k, meta] of Object.entries(VENUE_DICT)) {
     const kNum = Number(k);
     if (PRACTICE_WALLS.some((w) => w.venue_k === kNum)) continue; // shown as static card
+    if (UNLISTED_VENUES.some((u) => u.venue_k === kNum)) continue; // shown as static card
     map.set(kNum, {
       venue_k: kNum,
       name: meta.name,
@@ -446,7 +468,7 @@ export default function Home() {
                       未開放租借
                     </span>
                   </div>
-                  <p className="text-xs text-zinc-500 leading-relaxed">{v.desc}</p>
+                  <p className="text-xs text-zinc-500 leading-relaxed">此場地目前未開放線上租借</p>
                   <a
                     href={`https://vbs.sports.taipei/venues/?K=${v.venue_k}`}
                     target="_blank"
