@@ -454,7 +454,7 @@ export default function Home() {
             })}
 
             {/* ── 未開放租借場地（永遠顯示）────── */}
-            {UNLISTED_VENUES.filter((v) => !selectedDistrict || v.district === selectedDistrict).map((v) => (
+            {!showBookableOnly && UNLISTED_VENUES.filter((v) => !selectedDistrict || v.district === selectedDistrict).map((v) => (
                 <div
                   key={v.venue_k}
                   className="group flex flex-col gap-4 rounded-xl p-5 border min-h-[200px] border-violet-500/20 bg-violet-500/5 hover:border-violet-400/40 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
@@ -480,8 +480,8 @@ export default function Home() {
                 </div>
               ))}
 
-            {/* ── 練習壁靜態卡片（永遠顯示）────── */}
-            {PRACTICE_WALLS.filter((w) => !selectedDistrict || w.district === selectedDistrict).map((w) => (
+            {/* ── 練習壁靜態卡片（只顯示可預約時隱藏）────── */}
+            {!showBookableOnly && PRACTICE_WALLS.filter((w) => !selectedDistrict || w.district === selectedDistrict).map((w) => (
               <div
                 key={w.venue_k}
                 className="group flex flex-col gap-4 rounded-xl p-5 border min-h-[200px] border-sky-500/20 bg-sky-500/5 hover:border-sky-400/40 hover:-translate-y-0.5 hover:shadow-lg transition-all duration-200"
