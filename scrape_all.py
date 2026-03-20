@@ -231,14 +231,18 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
                     inner_classes = set(inner_div.get("class") or [])
                     inner_text = inner_div.get_text(separator=" ", strip=True)
 
-                    if "RangeOut" in inner_classes or "已過期" in inner_text or "停止租借" in inner_text or "休館" in inner_text:
+                    # ⚠️ 純 class 判定：完全不信任 inner_text 來判斷「可預約」
+                    # 政府網站會把預約者名字/時間塞在 inner_text，導致誤判
+                    if "RangeOut" in inner_classes:
                         status = "已過期 停止租借"
-                    elif "UnBooked" in inner_classes:
+                    elif "UnBooked" in inner_classes and "Booked" not in inner_classes:
+                        # 只有確認有 UnBooked class 且沒有 Booked class 才是真空位
                         status = "可預約"
-                    elif "Booked" in inner_classes:
+                    elif "Booked" in inner_classes or inner_text:
+                        # Booked class，或有任何文字內容（人名、時間等）都算已額滿
                         status = "已額滿"
                     else:
-                        status = "已額滿" if inner_text else "無開放"
+                        status = "無開放"
 
                     prev = slot_best.get(time_slot)
                     if prev is None or STATUS_PRIORITY.get(status, 0) > STATUS_PRIORITY.get(prev, 0):
