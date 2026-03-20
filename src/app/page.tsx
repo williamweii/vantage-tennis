@@ -130,11 +130,43 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [venues, setVenues] = useState<VenueGroup[]>([]);
+  const [hotZone, setHotZone] = useState<{venue_k:number;name:string;district:string;availCount:number}[]>([]);
+  const [hotZoneLoading, setHotZoneLoading] = useState(true);
 
+  // Set default date to tomorrow
   useEffect(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     setDate(tomorrow.toISOString().slice(0, 10));
+  }, []);
+
+  // Auto-load hot zone on mount: top-4 venues by available slot count in next 14 days
+  useEffect(() => {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const end = new Date();
+    end.setDate(end.getDate() + 14);
+    const endStr = end.toISOString().slice(0, 10);
+    supabase
+      .from("court_availability")
+      .select("venue_k, status")
+      .eq("status", "可預約")
+      .gt("date", todayStr)
+      .lte("date", endStr)
+      .then(({ data }) => {
+        if (!data) { setHotZoneLoading(false); return; }
+        const counts: Record<number, number> = {};
+        for (const r of data) counts[r.venue_k] = (counts[r.venue_k] || 0) + 1;
+        const top4 = Object.entries(counts)
+          .sort(([, a], [, b]) => (b as number) - (a as number))
+          .slice(0, 4)
+          .map(([k, cnt]) => {
+            const kNum = Number(k);
+            const meta = VENUE_DICT[kNum];
+            return { venue_k: kNum, name: meta?.name ?? `K=${k}`, district: meta?.district ?? '', availCount: cnt as number };
+          });
+        setHotZone(top4);
+        setHotZoneLoading(false);
+      });
   }, []);
 
   const handleSearch = async () => {
@@ -320,14 +352,53 @@ export default function Home() {
 
       {/* ── MAIN ─────────────────────────────────────── */}
       <main className="max-w-screen-xl mx-auto px-6 pb-24">
-        {/* Empty – not searched yet */}
+        {/* ── HOT ZONE: default scarcity view before search ─── */}
         {!hasSearched && (
-          <div className="flex flex-col items-center justify-center py-32 gap-4 text-zinc-600">
-            <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="24" cy="24" r="22" stroke="currentColor" strokeWidth="2" />
-              <path d="M12 24 Q 18 14 24 24 Q 30 34 36 24" stroke="currentColor" strokeWidth="2" fill="none" />
-            </svg>
-            <p className="text-sm">選擇日期，開始尋找空位</p>
+          <div className="py-6">
+            <div className="flex items-center gap-2 mb-5">
+              <span className="text-2xl">🔥</span>
+              <h2 className="text-base font-bold text-zinc-100">
+                近期空位熱區
+                <span className="ml-2 text-zinc-500 font-normal text-sm">（自動分析未來5天較後可預約區間）</span>
+              </h2>
+            </div>
+            {hotZoneLoading ? (
+              <div className="flex justify-center py-20">
+                <div className="w-7 h-7 border-2 border-zinc-700 border-t-emerald-400 rounded-full animate-spin" />
+              </div>
+            ) : hotZone.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {hotZone.map((v, i) => (
+                  <div
+                    key={v.venue_k}
+                    className="flex flex-col gap-4 rounded-xl p-5 border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-zinc-900 hover:border-emerald-400/60 hover:-translate-y-1 hover:shadow-[0_4px_24px_rgba(52,211,153,0.12)] transition-all duration-200"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="text-xs text-emerald-500 font-bold mb-1"># {i + 1} 熱門場地</div>
+                        <p className="text-sm font-semibold text-zinc-100 leading-snug">{v.name}</p>
+                        <p className="text-xs text-zinc-500 mt-0.5">{v.district}</p>
+                      </div>
+                      <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 whitespace-nowrap">
+                        {v.availCount} 空位
+                      </span>
+                    </div>
+                    <a
+                      href={`https://vbs.sports.taipei/venues/?K=${v.venue_k}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-auto block text-center text-xs font-bold py-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500 hover:text-black transition-all duration-150 active:scale-95"
+                    >
+                      前往預約 →
+                    </a>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-20 gap-3 text-zinc-600">
+                <p className="text-sm">近期無可預約空位，選擇日期查詢</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -511,6 +582,26 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {/* ── FLOATING LINE SUBSCRIPTION BUTTON ──────── */}
+      <a
+        href={`https://liff.line.me/${process.env.NEXT_PUBLIC_LIFF_ID}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-6 right-5 z-[9999] group flex items-center gap-0 rounded-full shadow-xl transition-all duration-300 ease-out"
+        title="讓 AI 幫你盯著空位！"
+      >
+        {/* Hover label */}
+        <span
+          className="max-w-0 overflow-hidden whitespace-nowrap group-hover:max-w-[180px] text-sm font-bold text-white bg-[#06C755] pl-0 group-hover:pl-4 pr-0 group-hover:pr-2 py-3.5 rounded-l-full transition-all duration-300 ease-out inline-block"
+        >
+          👉 讓 AI 幫你盯著空位！
+        </span>
+        {/* Bell icon pill */}
+        <span className="flex items-center justify-center w-14 h-14 rounded-full bg-[#06C755] hover:bg-[#05B744] shadow-[0_4px_20px_rgba(6,199,85,0.5)] text-white text-2xl animate-bounce">
+          🔔
+        </span>
+      </a>
 
       {/* ── FOOTER ───────────────────────────────────── */}
       <footer className="border-t border-zinc-800/60 py-8 text-center text-xs text-zinc-600">
