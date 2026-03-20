@@ -116,6 +116,24 @@ VENUE_NAMES = {
     1060: "百齡河濱公園(社子岸)網球場A",
 }
 
+# 🎾 場地 → 行政區字典
+VENUE_DISTRICT_MAP: dict[int, str] = {
+    1060: "士林區",
+    1042: "士林區",
+    324:  "大同區",
+    341:  "中山區",
+    687:  "中山區",
+    201:  "松山區",
+    266:  "中正區",
+    305:  "中正區",
+    352:  "中正區",
+    239:  "萬華區",
+    425:  "萬華區",
+    210:  "萬華區",
+    312:  "內湖區",
+    174:  "北投區",
+}
+
 # ==========================================
 # 3. 檢查 Supabase
 # ==========================================
@@ -226,12 +244,20 @@ async def scrape_single_venue(k: int, target_date: str, context, sem: asyncio.Se
                     if prev is None or STATUS_PRIORITY.get(status, 0) > STATUS_PRIORITY.get(prev, 0):
                         slot_best[time_slot] = status
 
+                all_raw_statuses = set()
+                for tdr in container.find_all('td', class_='TdR'):
+                    inner_div = tdr.select_one("div[id^='Sched.']")
+                    if inner_div:
+                        all_raw_statuses.add(inner_div.get_text(separator=" ", strip=True) or repr(set(inner_div.get('class') or [])))
+                print(f"🚨 K={k} 系統抓到的所有原始狀態種類：{all_raw_statuses}")
+
                 for time_slot, status in slot_best.items():
                     records.append({
                         "venue_k": k,
                         "date": target_date,
                         "time_slot": time_slot,
-                        "status": status
+                        "status": status,
+                        "district": VENUE_DISTRICT_MAP.get(k, "")
                     })
 
                 return records
@@ -325,9 +351,11 @@ async def main():
                 print(f"⚠️ 日期 {target_date} 無可用資料。")
                 continue
 
-            # 🎯 收集可預約空位
+            # 🎯 收集可預約空位（補 district）
             for r in clean_records:
                 if r['status'] == '可預約':
+                    if 'district' not in r:
+                        r['district'] = VENUE_DISTRICT_MAP.get(r['venue_k'], "")
                     available_slots_found.append(r)
 
         await context.close()
@@ -380,7 +408,7 @@ async def main():
             msg += f"📍 {v_name}\n📅 {d}｜{times}\n\n"
         if len(sorted_groups) > 8:
             msg += f"… 共 {len(user_slots)} 個時段\n\n"
-        msg += "👉 https://vbs.sports.taipei/"
+        msg += "👉 https://vantage-tennis.vercel.app"
         return msg
 
     # 從 Supabase 取出所有啟用通知的用戶
@@ -395,8 +423,6 @@ async def main():
         if hot_slots and LINE_USER_ID:
             push_line_message(LINE_USER_ID, build_push_msg(hot_slots))
             print(f"📱 [單代模式] 已發送 LINE 通知（{len(hot_slots)} 個近期空位）！")
-        else:
-            print("📭 今天沒有找到近期可預約的空位。")
     else:
         push_count = 0
         for user in users:
@@ -420,6 +446,18 @@ async def main():
             push_count += 1
 
         print(f"📱 已對 {push_count} 位用戶發送個人化推播。")
+
+    # ==========================================
+    # 8. 上帝模式測試推播（無條件執行）
+    # ==========================================
+    print("🚨 準備執行上帝模式測試推播...")
+    test_msg = "🚨 上帝模式測試：系統執行完畢！若您收到此訊息，代表 LINE API 通道完全正常。"
+    target_id = users[0]['line_user_id'] if users else LINE_USER_ID
+    if target_id:
+        push_line_message(target_id, test_msg)
+        print("✅ 上帝模式測試推播發送成功！")
+    else:
+        print("⚠️ 找不到目標 LINE ID 可發送上帝模式測試。")
 
 if __name__ == '__main__':
     asyncio.run(main())
